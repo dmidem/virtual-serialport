@@ -7,7 +7,7 @@ fn main() {
     let write_data = b"hello";
     let mut read_data = [0u8; 5];
 
-    port1.write(write_data).unwrap();
-    port2.read(&mut read_data).unwrap();
+    port1.write_all(write_data).unwrap();
+    port2.read_exact(&mut read_data).unwrap();
     assert_eq!(&read_data, write_data);
 }

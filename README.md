@@ -42,8 +42,8 @@ let mut port = VirtualPort::open_loopback(9600, 1024).unwrap();
 let write_data = b"hello";
 let mut read_data = [0u8; 5];
 
-port.write(write_data).unwrap();
-port.read(&mut read_data).unwrap();
+port.write_all(write_data).unwrap();
+port.read_exact(&mut read_data).unwrap();
 assert_eq!(&read_data, write_data);
 ```
 
@@ -57,8 +57,8 @@ let (mut port1, mut port2) = VirtualPort::open_pair(9600, 1024).unwrap();
 let write_data = b"hello";
 let mut read_data = [0u8; 5];
 
-port1.write(write_data).unwrap();
-port2.read(&mut read_data).unwrap();
+port1.write_all(write_data).unwrap();
+port2.read_exact(&mut read_data).unwrap();
 assert_eq!(&read_data, write_data);
 ```
 

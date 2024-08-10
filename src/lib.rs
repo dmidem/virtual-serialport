@@ -43,8 +43,8 @@
 //! let write_data = b"hello";
 //! let mut read_data = [0u8; 5];
 //!
-//! port.write(write_data).unwrap();
-//! port.read(&mut read_data).unwrap();
+//! port.write_all(write_data).unwrap();
+//! port.read_exact(&mut read_data).unwrap();
 //! assert_eq!(&read_data, write_data);
 //! ```
 //!
@@ -58,8 +58,8 @@
 //! let write_data = b"hello";
 //! let mut read_data = [0u8; 5];
 //!
-//! port1.write(write_data).unwrap();
-//! port2.read(&mut read_data).unwrap();
+//! port1.write_all(write_data).unwrap();
+//! port2.read_exact(&mut read_data).unwrap();
 //! assert_eq!(&read_data, write_data);
 //! ```
 
@@ -554,8 +554,8 @@ mod tests {
         let write_data = b"hello";
         let mut read_data = [0u8; 5];
 
-        assert_eq!(port.write(write_data).unwrap(), 5);
-        assert_eq!(port.read(&mut read_data).unwrap(), 5);
+        port.write_all(write_data).unwrap();
+        port.read_exact(&mut read_data).unwrap();
         assert_eq!(&read_data, write_data);
     }
 
@@ -565,8 +565,8 @@ mod tests {
         let write_data = b"hello";
         let mut read_data = [0u8; 5];
 
-        assert_eq!(port1.write(write_data).unwrap(), 5);
-        assert_eq!(port2.read(&mut read_data).unwrap(), 5);
+        port1.write_all(write_data).unwrap();
+        port2.read_exact(&mut read_data).unwrap();
         assert_eq!(&read_data, write_data);
     }
 
@@ -577,7 +577,7 @@ mod tests {
         let mut read_data = [0u8; 5];
 
         assert_eq!(
-            port.read(&mut read_data).unwrap_err().kind(),
+            port.read_exact(&mut read_data).unwrap_err().kind(),
             io::ErrorKind::TimedOut
         );
     }
@@ -587,16 +587,16 @@ mod tests {
         let mut port = VirtualPort::open_loopback(9600, 1024).unwrap();
 
         port.write_request_to_send(true).unwrap();
-        assert_eq!(port.read_clear_to_send().unwrap(), true);
+        assert!(port.read_clear_to_send().unwrap());
 
         port.write_data_terminal_ready(true).unwrap();
-        assert_eq!(port.read_data_set_ready().unwrap(), true);
+        assert!(port.read_data_set_ready().unwrap());
 
         port.write_request_to_send(false).unwrap();
-        assert_eq!(port.read_clear_to_send().unwrap(), false);
+        assert!(!port.read_clear_to_send().unwrap());
 
         port.write_data_terminal_ready(false).unwrap();
-        assert_eq!(port.read_data_set_ready().unwrap(), false);
+        assert!(!port.read_data_set_ready().unwrap());
     }
 
     #[test]
@@ -606,11 +606,11 @@ mod tests {
         let write_data = b"test";
         let mut read_data = [0u8; 4];
 
-        port.write(write_data).unwrap();
+        port.write_all(write_data).unwrap();
         port.clear(ClearBuffer::All).unwrap();
 
         assert_eq!(
-            port.read(&mut read_data).unwrap_err().kind(),
+            port.read_exact(&mut read_data).unwrap_err().kind(),
             io::ErrorKind::TimedOut
         );
     }
@@ -632,13 +632,13 @@ mod tests {
 
         let writer = thread::spawn(move || {
             let write_data = b"hello";
-            port.write(write_data).unwrap();
+            port.write_all(write_data).unwrap();
         });
 
         let reader = thread::spawn(move || {
             let mut read_data = [0u8; 5];
             thread::sleep(time::Duration::from_millis(100));
-            port_clone.read(&mut read_data).unwrap();
+            port_clone.read_exact(&mut read_data).unwrap();
             assert_eq!(&read_data, b"hello");
         });
 
@@ -673,21 +673,21 @@ mod tests {
         let mut port = VirtualPort::open_loopback(50, 1024).unwrap();
 
         // Initially, simulate_delay should be false by default
-        assert_eq!(port.simulate_delay(), false);
+        assert!(!port.simulate_delay());
 
         // Enable simulation delay
         port.set_simulate_delay(true);
-        assert_eq!(port.simulate_delay(), true);
+        assert!(port.simulate_delay());
 
         // Write data to the port
         // (for 5 symbols the transmission time is about 1 second for 50 baud rate)
         let write_data = b"hello";
-        port.write(write_data).unwrap();
+        port.write_all(write_data).unwrap();
 
         // Read data from the port and measure duration
         let mut read_data = [0u8; 5];
         let start = Instant::now();
-        port.read(&mut read_data).unwrap();
+        port.read_exact(&mut read_data).unwrap();
         let duration = start.elapsed();
 
         assert_eq!(&read_data, write_data);
@@ -699,8 +699,8 @@ mod tests {
         let (mut port1, mut port2) = VirtualPort::open_pair(9600, 1024).unwrap();
 
         // Initially, noise simulation should be disabled by default
-        assert_eq!(port1.noise_on_config_mismatch(), false);
-        assert_eq!(port2.noise_on_config_mismatch(), false);
+        assert!(!port1.noise_on_config_mismatch());
+        assert!(!port2.noise_on_config_mismatch());
 
         let write_data = b"hello world";
         let mut read_data = [0u8; 11];
@@ -708,11 +708,11 @@ mod tests {
         // Case 1: Verify data transfer when configurations match (noise simulation is not enabled)
 
         // Write data to port1
-        port1.write(write_data).unwrap();
+        port1.write_all(write_data).unwrap();
 
         // Read data from port2
         read_data.fill(0);
-        port2.read(&mut read_data).unwrap();
+        port2.read_exact(&mut read_data).unwrap();
 
         // Ensure the data in the buffers are equal
         assert_eq!(&read_data, write_data);
@@ -723,11 +723,11 @@ mod tests {
         port2.set_baud_rate(19200).unwrap();
 
         // Write data to port1
-        port1.write(write_data).unwrap();
+        port1.write_all(write_data).unwrap();
 
         // Read data from port2
         read_data.fill(0);
-        port2.read(&mut read_data).unwrap();
+        port2.read_exact(&mut read_data).unwrap();
 
         // Ensure the data in the buffers are equal
         assert_eq!(&read_data, write_data);
@@ -736,18 +736,18 @@ mod tests {
 
         // Enable noise simulation for port2
         port2.set_noise_on_config_mismatch(true);
-        assert_eq!(port1.noise_on_config_mismatch(), false);
-        assert_eq!(port2.noise_on_config_mismatch(), true);
+        assert!(!port1.noise_on_config_mismatch());
+        assert!(port2.noise_on_config_mismatch());
 
         // Set baud rate to the original value to match configs
         port2.set_baud_rate(port1.baud_rate().unwrap()).unwrap();
 
         // Write data to port1
-        port1.write(write_data).unwrap();
+        port1.write_all(write_data).unwrap();
 
         // Read data from port2
         read_data.fill(0);
-        port2.read(&mut read_data).unwrap();
+        port2.read_exact(&mut read_data).unwrap();
 
         // Ensure the data in the buffers are equal
         assert_eq!(&read_data, write_data);
@@ -758,11 +758,11 @@ mod tests {
         port2.set_baud_rate(19200).unwrap();
 
         // Write data to port1
-        port1.write(write_data).unwrap();
+        port1.write_all(write_data).unwrap();
 
         // Read data from port2
         read_data.fill(0);
-        port2.read(&mut read_data).unwrap();
+        port2.read_exact(&mut read_data).unwrap();
 
         // Ensure the buffer differs and contains random data (simple test to check non-zero bytes)
         assert_ne!(&read_data, write_data);
