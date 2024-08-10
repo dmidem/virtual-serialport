@@ -48,7 +48,7 @@ assert_eq!(&read_data, write_data);
 ```
 
 ### Pair Example
-```
+```rust
 use std::io::{Read, Write};
 
 use virtual_serialport::VirtualPort;
