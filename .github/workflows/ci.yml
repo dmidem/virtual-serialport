@@ -14,11 +14,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Set up Rust
-      uses: actions/setup-rust@v1
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
       with:
-        rust-version: ${{ matrix.rust }}
-
+        toolchain: stable
+        components: rustfmt, clippy
+        override: true
+ 
     - name: Install dependencies
       run: cargo fetch
 
