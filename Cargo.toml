@@ -1,0 +1,15 @@
+[package]
+name = "virtual-serialport"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.59.0"
+description = "Simulates serial ports for testing. Designed to work with the `serialport` crate for virtual serial communication."
+authors = ["Dmitry Demin <dmitry.demin@outlook.com>"]
+license = "MIT"
+readme = "README.md"
+keywords = ["serial", "serialport", "rs232", "testing", "simulation"]
+repository = "https://github.com/dmidem/virtual-serialport"
+
+[dependencies]
+rand = "0.8.5"
+serialport = "4.5.0"

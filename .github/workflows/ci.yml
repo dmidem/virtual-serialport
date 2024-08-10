@@ -1,0 +1,52 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test_and_examples:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        rust: [stable]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Rust
+      uses: actions/setup-rust@v1
+      with:
+        rust-version: ${{ matrix.rust }}
+
+    - name: Install dependencies
+      run: cargo fetch
+
+    - name: Run linting
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Run tests
+      run: cargo test
+
+    - name: Build documentation
+      run: cargo doc --no-deps
+
+    - name: Test documentation examples
+      run: cargo test --doc
+        
+    - name: Run examples
+      run: |
+        cargo run --example loopback
+        cargo run --example pair
+
+    - name: Cache cargo registry and build
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
