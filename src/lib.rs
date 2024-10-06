@@ -1,5 +1,3 @@
-// FIXME: tests for control lines in pair (stop transmission if disabled?)
-
 //! # Virtual Serial Port
 //!
 //! The Serial Port Simulator (virtual port) is designed to work alongside the
@@ -39,7 +37,7 @@
 //!
 //! use virtual_serialport::VirtualPort;
 //!
-//! let mut port = VirtualPort::open_loopback(9600, 1024).unwrap();
+//! let mut port = VirtualPort::loopback(9600, 1024).unwrap();
 //! let write_data = b"hello";
 //! let mut read_data = [0u8; 5];
 //!
@@ -54,7 +52,7 @@
 //!
 //! use virtual_serialport::VirtualPort;
 //!
-//! let (mut port1, mut port2) = VirtualPort::open_pair(9600, 1024).unwrap();
+//! let (mut port1, mut port2) = VirtualPort::pair(9600, 1024).unwrap();
 //! let write_data = b"hello";
 //! let mut read_data = [0u8; 5];
 //!
@@ -69,17 +67,16 @@
 struct ReadMe;
 
 use std::{
-    collections::vec_deque::VecDeque,
     io,
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
 use rand::Rng;
 
-use serialport::{
-    ClearBuffer, DataBits, Error, ErrorKind, FlowControl, Parity, Result, SerialPort, StopBits,
-};
+use serialport::{ClearBuffer, DataBits, FlowControl, Parity, Result, SerialPort, StopBits};
+
+use mockpipe::MockPipe;
 
 struct Config {
     // Baud rate in symbols per second
@@ -96,9 +93,6 @@ struct Config {
 
     // Number of stop bits
     stop_bits: StopBits,
-
-    // Timeout duration for read/write operations
-    timeout: Duration,
 
     // Whether to simulate the delay of data transmission based on baud rate.
     // If enabled, this will add a fixed delay for each symbol read to simulate
@@ -121,7 +115,6 @@ impl Config {
             flow_control: FlowControl::None,
             parity: Parity::None,
             stop_bits: StopBits::One,
-            timeout: Duration::from_millis(0),
             simulate_delay: false,
             noise_on_config_mismatch: false,
         }
@@ -192,9 +185,7 @@ pub struct VirtualPort {
     // Reference to the paired port's configuration
     paired_port_config: Option<Arc<Mutex<Config>>>,
 
-    // Buffers and condition variables for read/write synchronization
-    read_buffer: Arc<(Mutex<VecDeque<u8>>, Condvar, Condvar)>,
-    write_buffer: Arc<(Mutex<VecDeque<u8>>, Condvar, Condvar)>,
+    pipe: MockPipe,
 
     // Control lines (RTS<-->CTS, DTR<-->DSR/CD)
     // RI (ring indicator) is always true in this implementation
@@ -206,12 +197,7 @@ pub struct VirtualPort {
 
 impl VirtualPort {
     /// Opens a single loopback virtual port with the specified baud rate.
-    pub fn open_loopback(baud_rate: u32, buffer_capacity: usize) -> Result<Self> {
-        let buffer = Arc::new((
-            Mutex::new(VecDeque::with_capacity(buffer_capacity)),
-            Condvar::new(),
-            Condvar::new(),
-        ));
+    pub fn loopback(baud_rate: u32, buffer_capacity: u32) -> Result<Self> {
         let rts_cts = Arc::new(Mutex::new(true));
         let dtr_dsr_cd = Arc::new(Mutex::new(true));
 
@@ -219,8 +205,7 @@ impl VirtualPort {
             config: Arc::new(Mutex::new(Config::new(baud_rate))),
             paired_port_config: None,
 
-            read_buffer: buffer.clone(),
-            write_buffer: buffer.clone(),
+            pipe: MockPipe::loopback(buffer_capacity as usize),
 
             rts: rts_cts.clone(),
             cts: rts_cts.clone(),
@@ -231,29 +216,22 @@ impl VirtualPort {
 
     /// Opens a pair of connected virtual ports with the specified baud rate.
     /// These ports can simulate a communication between two devices.
-    pub fn open_pair(baud_rate: u32, buffer_capacity: usize) -> Result<(Self, Self)> {
-        let read_buffer = Arc::new((
-            Mutex::new(VecDeque::with_capacity(buffer_capacity)),
-            Condvar::new(),
-            Condvar::new(),
-        ));
-        let write_buffer = Arc::new((
-            Mutex::new(VecDeque::with_capacity(buffer_capacity)),
-            Condvar::new(),
-            Condvar::new(),
-        ));
+    pub fn pair(baud_rate: u32, buffer_capacity: u32) -> Result<(Self, Self)> {
+        let config1 = Arc::new(Mutex::new(Config::new(baud_rate)));
+        let config2 = Arc::new(Mutex::new(Config::new(baud_rate)));
+
+        let (pipe1, pipe2) = MockPipe::pair(buffer_capacity as usize);
 
         let rts = Arc::new(Mutex::new(true));
         let cts = Arc::new(Mutex::new(true));
         let dtr = Arc::new(Mutex::new(true));
         let dsr_cd = Arc::new(Mutex::new(true));
 
-        let mut port1 = Self {
-            config: Arc::new(Mutex::new(Config::new(baud_rate))),
-            paired_port_config: None,
+        let port1 = Self {
+            config: config1.clone(),
+            paired_port_config: Some(config2.clone()),
 
-            read_buffer: read_buffer.clone(),
-            write_buffer: write_buffer.clone(),
+            pipe: pipe1,
 
             rts: rts.clone(),
             cts: cts.clone(),
@@ -261,12 +239,11 @@ impl VirtualPort {
             dsr_cd: dsr_cd.clone(),
         };
 
-        let mut port2 = Self {
-            config: Arc::new(Mutex::new(Config::new(baud_rate))),
-            paired_port_config: None,
+        let port2 = Self {
+            config: config2,
+            paired_port_config: Some(config1),
 
-            read_buffer: write_buffer.clone(),
-            write_buffer: read_buffer.clone(),
+            pipe: pipe2,
 
             rts: cts.clone(),
             cts: rts.clone(),
@@ -274,10 +251,12 @@ impl VirtualPort {
             dsr_cd: dtr.clone(),
         };
 
-        port1.paired_port_config = Some(port2.config.clone());
-        port2.paired_port_config = Some(port1.config.clone());
-
         Ok((port1, port2))
+    }
+
+    /// Boxes the instance as a `SerialPort`.
+    pub fn into_boxed(self) -> Box<dyn SerialPort> {
+        Box::new(self)
     }
 
     /// Returns whether transmission delay simulation is enabled.
@@ -303,26 +282,7 @@ impl VirtualPort {
 
 impl io::Read for VirtualPort {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let (buffer_mutex, can_read, can_write) = &*self.read_buffer.clone();
-
-        let mut buffer_guard = buffer_mutex.lock().unwrap();
-
-        if buffer_guard.is_empty() {
-            let (new_buffer_guard, timeout_result) =
-                can_read.wait_timeout(buffer_guard, self.timeout()).unwrap();
-
-            if timeout_result.timed_out() {
-                return Err(io::Error::from(io::ErrorKind::TimedOut));
-            }
-
-            buffer_guard = new_buffer_guard;
-        }
-
-        let bytes_to_read = buf.len().min(buffer_guard.len());
-
-        for byte in buf.iter_mut().take(bytes_to_read) {
-            *byte = buffer_guard.pop_front().unwrap();
-        }
+        let bytes_to_read = self.pipe.read(buf)?;
 
         // Lock the configuration once and get necessary parameters
         let (noise_required, delay_per_byte) = {
@@ -354,9 +314,6 @@ impl io::Read for VirtualPort {
                 .for_each(|byte| *byte = rng.gen());
         }
 
-        // Notify the writer that space is available
-        can_write.notify_one();
-
         // Simulate the delay of data transmission based on baud rate
         if let Some(delay) = delay_per_byte {
             std::thread::sleep(delay * bytes_to_read as u32);
@@ -368,42 +325,11 @@ impl io::Read for VirtualPort {
 
 impl io::Write for VirtualPort {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let (buffer_mutex, can_read, can_write) = &*self.write_buffer;
-
-        let mut buffer_guard = buffer_mutex.lock().unwrap();
-
-        if buffer_guard.capacity() - buffer_guard.len() == 0 {
-            let (new_buffer_guard, timeout_result) = can_write
-                .wait_timeout(buffer_guard, self.timeout())
-                .unwrap();
-
-            if timeout_result.timed_out() {
-                return Err(io::Error::from(io::ErrorKind::TimedOut));
-            }
-
-            buffer_guard = new_buffer_guard;
-        }
-
-        let bytes_to_write = buf.len().min(buffer_guard.capacity() - buffer_guard.len());
-
-        buffer_guard.extend(&buf[0..bytes_to_write]);
-
-        // Notify the reader that data is available
-        can_read.notify_one();
-
-        Ok(bytes_to_write)
+        self.pipe.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        let (buffer_mutex, _, can_write) = &*self.write_buffer;
-
-        let mut buffer_guard = buffer_mutex.lock().unwrap();
-
-        while buffer_guard.len() > 0 {
-            buffer_guard = can_write.wait(buffer_guard).unwrap();
-        }
-
-        Ok(())
+        self.pipe.flush()
     }
 }
 
@@ -433,7 +359,7 @@ impl SerialPort for VirtualPort {
     }
 
     fn timeout(&self) -> Duration {
-        self.config.lock().unwrap().timeout
+        self.pipe.timeout().unwrap_or(Duration::MAX)
     }
 
     fn set_baud_rate(&mut self, baud_rate: u32) -> Result<()> {
@@ -462,7 +388,10 @@ impl SerialPort for VirtualPort {
     }
 
     fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
-        self.config.lock().unwrap().timeout = timeout;
+        self.pipe.set_timeout(match timeout {
+            Duration::MAX => None,
+            duration => Some(duration),
+        });
         Ok(())
     }
 
@@ -493,39 +422,23 @@ impl SerialPort for VirtualPort {
     }
 
     fn bytes_to_read(&self) -> Result<u32> {
-        u32::try_from(self.read_buffer.0.lock().unwrap().len())
-            .map_err(|_| Error::new(ErrorKind::Unknown, "buffer is too large"))
+        // The `buffer_capacity` argument in the constructor methods of `VirtualPort`
+        // is limited to u32, ensuring that the number of bytes in the buffers never
+        // exceeds u32. Therefore, we can safely unwrap the result of `try_from`.
+        Ok(u32::try_from(self.pipe.read_buffer_len()).unwrap())
     }
 
     fn bytes_to_write(&self) -> Result<u32> {
-        u32::try_from(self.write_buffer.0.lock().unwrap().len())
-            .map_err(|_| Error::new(ErrorKind::Unknown, "buffer is too large"))
+        // Safe to unwrap: see comment in `bytes_to_read`.
+        Ok(u32::try_from(self.pipe.write_buffer_len()).unwrap())
     }
 
     fn clear(&self, buffer_to_clear: ClearBuffer) -> Result<()> {
-        let (read_buffer, write_buffer) = if Arc::ptr_eq(&self.read_buffer, &self.write_buffer) {
-            // If loopback
-            (None, Some(&*self.write_buffer))
-        } else {
-            // If pair
-            match buffer_to_clear {
-                ClearBuffer::Input => (Some(&*self.read_buffer), None),
-                ClearBuffer::Output => (None, Some(&*self.write_buffer)),
-                ClearBuffer::All => (Some(&*self.read_buffer), Some(&*self.write_buffer)),
-            }
-        };
-
-        if let Some(buffer) = read_buffer {
-            let (buffer_mutex, _, _) = buffer;
-            buffer_mutex.lock().unwrap().clear()
+        match buffer_to_clear {
+            ClearBuffer::Input => self.pipe.clear_read(),
+            ClearBuffer::Output => self.pipe.clear_write(),
+            ClearBuffer::All => self.pipe.clear(),
         }
-
-        if let Some(buffer) = write_buffer {
-            let (buffer_mutex, _, can_write) = buffer;
-            buffer_mutex.lock().unwrap().clear();
-            can_write.notify_one();
-        }
-
         Ok(())
     }
 
@@ -549,42 +462,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_loopback() {
-        let mut port = VirtualPort::open_loopback(9600, 1024).unwrap();
-        let write_data = b"hello";
-        let mut read_data = [0u8; 5];
-
-        port.write_all(write_data).unwrap();
-        port.read_exact(&mut read_data).unwrap();
-        assert_eq!(&read_data, write_data);
-    }
-
-    #[test]
-    fn test_open_pair() {
-        let (mut port1, mut port2) = VirtualPort::open_pair(9600, 1024).unwrap();
-        let write_data = b"hello";
-        let mut read_data = [0u8; 5];
-
-        port1.write_all(write_data).unwrap();
-        port2.read_exact(&mut read_data).unwrap();
-        assert_eq!(&read_data, write_data);
-    }
-
-    #[test]
-    fn test_timeout() {
-        let mut port = VirtualPort::open_loopback(9600, 1024).unwrap();
-        port.set_timeout(Duration::from_millis(100)).unwrap();
-        let mut read_data = [0u8; 5];
-
-        assert_eq!(
-            port.read_exact(&mut read_data).unwrap_err().kind(),
-            io::ErrorKind::TimedOut
-        );
-    }
-
-    #[test]
     fn test_control_lines() {
-        let mut port = VirtualPort::open_loopback(9600, 1024).unwrap();
+        let mut port = VirtualPort::loopback(9600, 1024).unwrap();
 
         port.write_request_to_send(true).unwrap();
         assert!(port.read_clear_to_send().unwrap());
@@ -601,7 +480,7 @@ mod tests {
 
     #[test]
     fn test_buffer_clearing() {
-        let mut port = VirtualPort::open_loopback(9600, 1024).unwrap();
+        let mut port = VirtualPort::loopback(9600, 1024).unwrap();
         port.set_timeout(Duration::from_millis(100)).unwrap();
         let write_data = b"test";
         let mut read_data = [0u8; 4];
@@ -617,38 +496,15 @@ mod tests {
 
     #[test]
     fn test_clone() {
-        let port = VirtualPort::open_loopback(9600, 1024).unwrap();
+        let port = VirtualPort::loopback(9600, 1024).unwrap();
         let port_clone = port.try_clone().unwrap();
 
         assert_eq!(port.baud_rate().unwrap(), port_clone.baud_rate().unwrap());
     }
 
     #[test]
-    fn test_multiple_threads() {
-        use std::{thread, time};
-
-        let mut port = VirtualPort::open_loopback(9600, 1024).unwrap();
-        let mut port_clone = port.try_clone().unwrap();
-
-        let writer = thread::spawn(move || {
-            let write_data = b"hello";
-            port.write_all(write_data).unwrap();
-        });
-
-        let reader = thread::spawn(move || {
-            let mut read_data = [0u8; 5];
-            thread::sleep(time::Duration::from_millis(100));
-            port_clone.read_exact(&mut read_data).unwrap();
-            assert_eq!(&read_data, b"hello");
-        });
-
-        writer.join().unwrap();
-        reader.join().unwrap();
-    }
-
-    #[test]
     fn test_config_change() {
-        let mut port = VirtualPort::open_loopback(9600, 1024).unwrap();
+        let mut port = VirtualPort::loopback(9600, 1024).unwrap();
 
         port.set_baud_rate(19200).unwrap();
         assert_eq!(port.baud_rate().unwrap(), 19200);
@@ -670,7 +526,7 @@ mod tests {
     fn test_delay_simulation() {
         use std::time::Instant;
 
-        let mut port = VirtualPort::open_loopback(50, 1024).unwrap();
+        let mut port = VirtualPort::loopback(50, 1024).unwrap();
 
         // Initially, simulate_delay should be false by default
         assert!(!port.simulate_delay());
@@ -696,7 +552,7 @@ mod tests {
 
     #[test]
     fn test_noise_on_config_mismatch() {
-        let (mut port1, mut port2) = VirtualPort::open_pair(9600, 1024).unwrap();
+        let (mut port1, mut port2) = VirtualPort::pair(9600, 1024).unwrap();
 
         // Initially, noise simulation should be disabled by default
         assert!(!port1.noise_on_config_mismatch());

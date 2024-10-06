@@ -11,5 +11,6 @@ keywords = ["serial", "serialport", "rs232", "testing", "simulation"]
 repository = "https://github.com/dmidem/virtual-serialport"
 
 [dependencies]
+mockpipe = "0.1.6"
 rand = "0.8.5"
 serialport = "4.5.0"

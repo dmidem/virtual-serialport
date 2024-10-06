@@ -38,7 +38,7 @@ use std::io::{Read, Write};
 
 use virtual_serialport::VirtualPort;
 
-let mut port = VirtualPort::open_loopback(9600, 1024).unwrap();
+let mut port = VirtualPort::loopback(9600, 1024).unwrap();
 let write_data = b"hello";
 let mut read_data = [0u8; 5];
 
@@ -53,7 +53,7 @@ use std::io::{Read, Write};
 
 use virtual_serialport::VirtualPort;
 
-let (mut port1, mut port2) = VirtualPort::open_pair(9600, 1024).unwrap();
+let (mut port1, mut port2) = VirtualPort::pair(9600, 1024).unwrap();
 let write_data = b"hello";
 let mut read_data = [0u8; 5];
 

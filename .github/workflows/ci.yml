@@ -24,9 +24,12 @@ jobs:
         toolchain: stable
         components: rustfmt, clippy
         override: true
- 
+
     - name: Install dependencies
       run: cargo fetch
+
+    - name: Run check
+      run: cargo check
 
     - name: Run linting
       run: cargo clippy --all-targets --all-features -- -D warnings
