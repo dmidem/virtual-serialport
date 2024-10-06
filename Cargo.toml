@@ -1,6 +1,6 @@
 [package]
 name = "virtual-serialport"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 rust-version = "1.59.0"
 description = "Simulates serial ports for testing. Designed to work with the `serialport` crate for virtual serial communication."
