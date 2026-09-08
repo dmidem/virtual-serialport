@@ -190,7 +190,7 @@ pub struct VirtualPort {
     pipe: MockPipe,
 
     // Control lines (RTS<-->CTS, DTR<-->DSR/CD)
-    // RI (ring indicator) is always true in this implementation
+    ri: Arc<Mutex<bool>>,
     rts: Arc<Mutex<bool>>,
     cts: Arc<Mutex<bool>>,
     dtr: Arc<Mutex<bool>>,
@@ -202,6 +202,7 @@ impl VirtualPort {
     pub fn loopback(baud_rate: u32, buffer_capacity: u32) -> Result<Self> {
         let rts_cts = Arc::new(Mutex::new(true));
         let dtr_dsr_cd = Arc::new(Mutex::new(true));
+        let ri = Arc::new(Mutex::new(true));
 
         Ok(Self {
             config: Arc::new(Mutex::new(Config::new(baud_rate))),
@@ -213,6 +214,7 @@ impl VirtualPort {
             cts: rts_cts.clone(),
             dtr: dtr_dsr_cd.clone(),
             dsr_cd: dtr_dsr_cd.clone(),
+            ri: ri.clone(),
         })
     }
 
@@ -228,6 +230,7 @@ impl VirtualPort {
         let cts = Arc::new(Mutex::new(true));
         let dtr = Arc::new(Mutex::new(true));
         let dsr_cd = Arc::new(Mutex::new(true));
+        let ri = Arc::new(Mutex::new(true));
 
         let port1 = Self {
             config: config1.clone(),
@@ -239,6 +242,7 @@ impl VirtualPort {
             cts: cts.clone(),
             dtr: dtr.clone(),
             dsr_cd: dsr_cd.clone(),
+            ri: ri.clone(),
         };
 
         let port2 = Self {
@@ -251,6 +255,7 @@ impl VirtualPort {
             cts: rts.clone(),
             dtr: dsr_cd.clone(),
             dsr_cd: dtr.clone(),
+            ri: ri.clone(),
         };
 
         Ok((port1, port2))
@@ -279,6 +284,11 @@ impl VirtualPort {
     /// Sets whether to simulate corrupted symbols if physical settings don't match.
     pub fn set_noise_on_config_mismatch(&mut self, value: bool) {
         self.config.lock().unwrap().noise_on_config_mismatch = value;
+    }
+
+    pub fn write_ring_indicator(&self, level: bool) -> Result<()> {
+        *self.ri.lock().unwrap() = level;
+        Ok(())
     }
 }
 
@@ -416,7 +426,7 @@ impl SerialPort for VirtualPort {
     }
 
     fn read_ring_indicator(&mut self) -> Result<bool> {
-        Ok(false)
+        Ok(*self.ri.lock().unwrap())
     }
 
     fn read_carrier_detect(&mut self) -> Result<bool> {
