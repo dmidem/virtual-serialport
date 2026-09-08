@@ -165,6 +165,7 @@ impl Config {
 ///
 /// Port pair wiring diagram:
 ///
+/// ```text
 ///  Port 1            Port 2
 /// ┌─────┐           ┌─────┐
 /// │ TXD ├──────────▶│ RXD │
@@ -177,6 +178,7 @@ impl Config {
 /// │ CD  │◂┘         │     │
 /// │ RI  ├───────────┤ RI  │
 /// └─────┘           └─────┘
+/// ```
 #[derive(Clone)]
 pub struct VirtualPort {
     // Configuration settings (baud rate, data bits etc.)
